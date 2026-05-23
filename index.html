@@ -1,86 +1,227 @@
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>מצלמה בדיליי</title>
+
     <style>
-        * { box-sizing: border-box; }
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        #wrapper { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; position: relative; }
-        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: none; }
-        button { padding: 18px 40px; font-size: 22px; font-weight: bold; cursor: pointer; background: #0078d4; color: white; border: none; border-radius: 50px; z-index: 20; box-shadow: 0 4px 20px rgba(0,0,0,0.5); -webkit-tap-highlight-color: transparent; }
-        #blackOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; display: none; z-index: 10; }
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: black;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        #wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        video,
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        video {
+            display: none;
+            transform: scaleX(-1);
+        }
+
+        canvas {
+            z-index: 1;
+            transform: scaleX(-1);
+        }
+
+        #startBtn {
+            position: absolute;
+            z-index: 20;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 18px 40px;
+            font-size: 22px;
+            font-weight: bold;
+            border: none;
+            border-radius: 50px;
+            background: #0078d4;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #blackOverlay {
+            position: absolute;
+            inset: 0;
+            background: black;
+            z-index: 10;
+            display: none;
+        }
     </style>
 </head>
+
 <body>
 
-    <div id="wrapper">
-        <button id="startBtn">לחץ להפעלה</button>
-        <div id="blackOverlay"></div>
-        <video id="delayedVideo" autoplay playsinline muted></video>
-    </div>
+<div id="wrapper">
+    <button id="startBtn">לחץ להפעלה</button>
 
-    <script>
-        const btn = document.getElementById('startBtn');
-        const overlay = document.getElementById('blackOverlay');
-        const video = document.getElementById('delayedVideo');
-        const delaySeconds = 1.5;
+    <div id="blackOverlay"></div>
 
-        btn.onclick = async () => {
-            btn.style.display = 'none';
-            overlay.style.display = 'block';
-            
-            try {
-                // מותאם למובייל - מבקש את המצלמה הקדמית כברירת מחדל
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "user" }, 
-                    audio: false 
-                });
-                
-                const mimeType = 'video/webm; codecs="vp8"';
-                const mediaRecorder = new MediaRecorder(stream, { mimeType });
-                const sourceBuffer = new MediaSource();
-                video.src = URL.createObjectURL(sourceBuffer);
+    <video
+        id="video"
+        autoplay
+        muted
+        playsinline
+    ></video>
 
-                sourceBuffer.addEventListener('sourceopen', () => {
-                    const sb = sourceBuffer.addSourceBuffer(mimeType);
-                    
-                    mediaRecorder.ondataavailable = (e) => {
-                        if (e.data.size > 0 && sourceBuffer.readyState === 'open') {
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                                if (!sb.updating) sb.appendBuffer(new Uint8Array(reader.result));
-                            };
-                            reader.readAsArrayBuffer(e.data);
-                        }
-                    };
+    <canvas id="canvas"></canvas>
+</div>
 
-                    mediaRecorder.start(100);
+<script>
 
-                    setTimeout(() => {
-                        overlay.style.display = 'none';
-                        video.style.display = 'block';
-                        video.currentTime = 0;
-                        video.play();
+const startBtn = document.getElementById("startBtn");
+const overlay = document.getElementById("blackOverlay");
 
-                        setInterval(() => {
-                            if (video.paused || sb.buffered.length === 0) return;
-                            const bufferEnd = sb.buffered.end(sb.buffered.length - 1);
-                            const currentPos = video.currentTime;
-                            if (bufferEnd - currentPos < (delaySeconds - 0.1)) {
-                                video.currentTime = bufferEnd - delaySeconds;
-                            }
-                        }, 200); 
-                    }, delaySeconds * 1000);
-                });
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
 
-            } catch (err) {
-                alert("כדי שהאפקט יעבוד, יש לאשר גישה למצלמה בדפדפן.");
-                btn.style.display = 'block';
-                overlay.style.display = 'none';
+const ctx = canvas.getContext("2d");
+
+const delaySeconds = 1.5;
+
+/*
+    כמה פריימים לשנייה
+    30 נותן תוצאה חלקה
+*/
+const fps = 30;
+
+const frameBuffer = [];
+
+let captureWidth = 0;
+let captureHeight = 0;
+
+/*
+    בדיקת תמיכה
+*/
+if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert("הדפדפן לא תומך בגישה למצלמה");
+}
+
+/*
+    התחלה
+*/
+startBtn.addEventListener("click", async () => {
+
+    startBtn.style.display = "none";
+    overlay.style.display = "block";
+
+    try {
+
+        /*
+            בקשת מצלמה
+        */
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: "user",
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: false
+        });
+
+        video.srcObject = stream;
+
+        /*
+            ממתין שהוידאו ייטען
+        */
+        await video.play();
+
+        captureWidth = video.videoWidth;
+        captureHeight = video.videoHeight;
+
+        canvas.width = captureWidth;
+        canvas.height = captureHeight;
+
+        /*
+            כמה פריימים צריך לשמור
+        */
+        const delayFrames = Math.floor(delaySeconds * fps);
+
+        overlay.style.display = "none";
+
+        /*
+            לולאת רינדור
+        */
+        function render() {
+
+            /*
+                שומר פריים חדש
+            */
+            const tempCanvas = document.createElement("canvas");
+            tempCanvas.width = captureWidth;
+            tempCanvas.height = captureHeight;
+
+            const tempCtx = tempCanvas.getContext("2d");
+
+            tempCtx.drawImage(
+                video,
+                0,
+                0,
+                captureWidth,
+                captureHeight
+            );
+
+            frameBuffer.push(tempCanvas);
+
+            /*
+                שומר גודל buffer קבוע
+            */
+            if (frameBuffer.length > delayFrames) {
+
+                const delayedFrame = frameBuffer.shift();
+
+                ctx.drawImage(
+                    delayedFrame,
+                    0,
+                    0,
+                    captureWidth,
+                    captureHeight
+                );
             }
-        };
-    </script>
+
+            requestAnimationFrame(render);
+        }
+
+        render();
+
+    } catch (err) {
+
+        console.error(err);
+
+        alert("יש לאשר גישה למצלמה כדי להפעיל את האפקט.");
+
+        startBtn.style.display = "block";
+        overlay.style.display = "none";
+    }
+});
+
+</script>
+
 </body>
 </html>
